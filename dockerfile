@@ -1,12 +1,7 @@
-
 FROM ghcr.io/pterodactyl/panel:latest
 
-# Beralih ke root untuk menginstal dependensi OS
+# Instal mariadb-client untuk mendukung perintah 'mysql' saat migrasi
 USER root
-
-# Menginstal mariadb-client (ekuivalen mysql-client di Alpine) tanpa menyimpan cache
-# Ini menyelesaikan masalah "sh: mysql: not found"
 RUN apk add --no-cache mariadb-client
 
-# Kita TIDAK mendefinisikan ENTRYPOINT atau CMD baru.
-# Image bawaan sudah menggunakan S6 overlay / Supervisor yang akan otomatis tereksekusi.
+# Tetap gunakan entrypoint asli dari image Pterodactyl
