@@ -16,12 +16,11 @@ services:
     volumes:
       - panel_var:/app/var/
       - panel_nginx:/etc/nginx/http.d/
-      - panel_certs:/etc/letsencrypt/
       - panel_logs:/app/storage/logs/
     environment:
       - APP_ENV=production
       - APP_ENVIRONMENT_ONLY=false
-      # APP_KEY wajib ada untuk mencegah Error 500. Ini adalah key base64 standar Laravel.
+      # APP_KEY statis untuk mencegah Error 500 seketika
       - APP_KEY=base64:3p8i/N1xZgEw2s8pQ5y+nBf4vV9zK0L7mCjR2T3H5A8=
       - APP_URL=http://localhost
       - APP_TIMEZONE=Asia/Jakarta
@@ -30,8 +29,6 @@ services:
       - SESSION_DRIVER=redis
       - QUEUE_CONNECTION=redis
       - REDIS_HOST=cache
-      - REDIS_PASSWORD=
-      - REDIS_PORT=6379
       - DB_HOST=database
       - DB_PORT=3306
       - DB_DATABASE=panel
@@ -42,7 +39,8 @@ services:
     image: mysql:8.0
     container_name: pterodactyl_db
     restart: always
-    command: --default-authentication-plugin=mysql_native_password
+    # FIX: Mematikan SSL internal agar koneksi antar-container lancar tanpa TLS error
+    command: --default-authentication-plugin=mysql_native_password --ssl=0
     volumes:
       - db_data:/var/lib/mysql
     environment:
@@ -51,7 +49,6 @@ services:
       - MYSQL_PASSWORD=pterodactyl_password
       - MYSQL_ROOT_PASSWORD=root_password
     healthcheck:
-      # Menggunakan 127.0.0.1 untuk menghindari isu resolusi socket localhost di dalam container MySQL
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-proot_password"]
       interval: 10s
       timeout: 5s
@@ -70,6 +67,5 @@ services:
 volumes:
   panel_var:
   panel_nginx:
-  panel_certs:
   panel_logs:
   db_data:
