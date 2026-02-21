@@ -47,7 +47,7 @@ services:
       APP_ENV: production
       APP_DEBUG: false
       APP_URL: http://localhost
-      APP_KEY: 
+      APP_KEY: base64:S1nuTz1YDTMZ1pTMNE8JRChi5OznDgnI8ZhyEdkIOms=
       APP_TIMEZONE: UTC
       APP_LOCALE: en
       CACHE_DRIVER: redis
