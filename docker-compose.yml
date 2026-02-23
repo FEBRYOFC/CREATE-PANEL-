@@ -1,114 +1,129 @@
-version: '3.8'
+version: "3.9"
 
-networks:
-  pterodactyl_net:
-    driver: bridge
-
-volumes:
-  database_data:
-  redis_data:
-  panel_storage:
-  panel_public:
+# ================================
+#  PTERODACTYL PANEL - PRODUCTION
+# ================================
+# Services included:
+# - panel        (Laravel PHP application)
+# - nginx        (reverse proxy + static file server)
+# - mariadb      (database)
+# - redis        (cache + queue backend)
+# - queue-worker (Laravel queue worker)
+# - scheduler    (Laravel scheduler)
+#
+# All persistent data stored in volumes.
 
 services:
-  nginx:
-    image: nginx:alpine
-    container_name: pterodactyl_nginx
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - panel_public:/app/public:ro
-    depends_on:
-      - panel
-    networks:
-      - pterodactyl_net
 
-  panel:
-    image: ghcr.io/pterodactyl/panel:latest
-    container_name: pterodactyl_panel
-    restart: always
-    env_file: .env
-    entrypoint: /bin/sh
-    command: -c "php artisan migrate --force && php-fpm"
-    volumes:
-      - panel_storage:/app/storage
-      - panel_public:/app/public
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - pterodactyl_net
-    expose:
-      - "9000"
-
-  database:
+  # -------------------------------
+  # DATABASE (MariaDB 10.5+)
+  # -------------------------------
+  mariadb:
     image: mariadb:10.5
-    container_name: pterodactyl_database
-    restart: always
-    command: --default-authentication-plugin=mysql_native_password --ssl=0
+    command: --max-connections=500 --innodb-buffer-pool-size=1G
+    restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${DB_DATABASE:-panel}
-      MYSQL_USER: ${DB_USERNAME:-pterodactyl}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: pterodactyl
+      MYSQL_USER: pterodactyl
+      MYSQL_PASSWORD: panelpass
+      MYSQL_ROOT_PASSWORD: rootpass
     volumes:
-      - database_data:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
     networks:
-      - pterodactyl_net
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ptero
 
+  # -------------------------------
+  # REDIS
+  # -------------------------------
   redis:
     image: redis:7-alpine
-    container_name: pterodactyl_redis
-    restart: always
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     networks:
-      - pterodactyl_net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ptero
 
-  worker:
-    image: ghcr.io/pterodactyl/panel:latest
-    container_name: pterodactyl_worker
-    restart: always
-    env_file: .env
-    entrypoint: /bin/sh
-    command: -c "php artisan queue:work --queue=high,standard,low --sleep=3 --tries=3"
-    volumes:
-      - panel_storage:/app/storage
+  # -------------------------------
+  # PTERODACTYL PANEL (PHP-FPM)
+  # -------------------------------
+  panel:
+    image: ghcr.io/pterodactyl/panel:1.12.1
+    restart: unless-stopped
     depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - mariadb
+      - redis
+    env_file:
+      - ./panel.env
+    volumes:
+      - panel_app:/app
+      - panel_logs:/app/storage/logs
     networks:
-      - pterodactyl_net
+      - ptero
 
+  # -------------------------------
+  # QUEUE WORKER
+  # -------------------------------
+  queue-worker:
+    image: ghcr.io/pterodactyl/panel:1.12.1
+    restart: unless-stopped
+    depends_on:
+      - panel
+      - redis
+      - mariadb
+    env_file:
+      - ./panel.env
+    entrypoint: ["php", "/app/artisan", "queue:work", "--queue=high,standard,low", "--sleep=3", "--tries=3"]
+    volumes:
+      - panel_app:/app
+    networks:
+      - ptero
+
+  # -------------------------------
+  # SCHEDULER (cron runner)
+  # -------------------------------
   scheduler:
-    image: ghcr.io/pterodactyl/panel:latest
-    container_name: pterodactyl_scheduler
-    restart: always
-    env_file: .env
-    entrypoint: /bin/sh
-    command: -c "while true; do php artisan schedule:run >> /dev/null 2>&1; sleep 60; done"
-    volumes:
-      - panel_storage:/app/storage
+    image: ghcr.io/pterodactyl/panel:1.12.1
+    restart: unless-stopped
     depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - panel
+    env_file:
+      - ./panel.env
+    entrypoint: ["sh", "-c", "while true; do php /app/artisan schedule:run --verbose --no-interaction; sleep 60; done"]
+    volumes:
+      - panel_app:/app
     networks:
-      - pterodactyl_net
+      - ptero
+
+  # -------------------------------
+  # NGINX
+  # -------------------------------
+  nginx:
+    image: nginx:stable
+    restart: unless-stopped
+    depends_on:
+      - panel
+    volumes:
+      - panel_app:/var/www/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - ptero
+
+
+# -------------------------------
+# NETWORKS
+# -------------------------------
+networks:
+  ptero:
+
+# -------------------------------
+# VOLUMES (PERSISTENCE)
+# -------------------------------
+volumes:
+  panel_app:
+  panel_logs:
+  mariadb_data:
+  redis_data:
